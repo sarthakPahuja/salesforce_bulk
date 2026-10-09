@@ -4,21 +4,25 @@ module SalesforceBulk
 
   class Connection
 
-    @@XML_HEADER = '<?xml version="1.0" encoding="utf-8" ?>'
-    @@API_VERSION = nil
-    @@LOGIN_HOST = 'login.salesforce.com'
-    @@INSTANCE_HOST = nil # Gets set in login()
+    LOGIN_HOST = 'login.salesforce.com'
+    SANDBOX_LOGIN_HOST = 'test.salesforce.com'
 
+    # All connection state is per instance. It used to live in class variables,
+    # which every Connection in the process shares: a second login overwrote
+    # the first one's instance host, and once any sandbox connection had been
+    # made, every later login in the process went to the sandbox endpoint.
     def initialize(username, password, api_version, in_sandbox)
       @username = username
       @password = password
       @session_id = nil
       @server_url = nil
       @instance = nil
-      @@API_VERSION = api_version
-      @@LOGIN_PATH = "/services/Soap/u/#{@@API_VERSION}"
-      @@PATH_PREFIX = "/services/async/#{@@API_VERSION}/"
-      @@LOGIN_HOST = 'test.salesforce.com' if in_sandbox
+      @instance_host = nil # Gets set in login()
+      @api_version = api_version
+      @login_path = "/services/Soap/u/#{@api_version}"
+      @path_prefix = "/services/async/#{@api_version}/"
+      # Chosen both ways, for this connection only.
+      @login_host = in_sandbox ? SANDBOX_LOGIN_HOST : LOGIN_HOST
 
       login()
     end
@@ -41,14 +45,14 @@ module SalesforceBulk
 
       headers = Hash['Content-Type' => 'text/xml; charset=utf-8', 'SOAPAction' => 'login']
 
-      response = post_xml(@@LOGIN_HOST, @@LOGIN_PATH, xml, headers)
+      response = post_xml(@login_host, @login_path, xml, headers)
       # response_parsed = XmlSimple.xml_in(response)
       response_parsed = parse_response response
 
       @session_id = response_parsed['Body'][0]['loginResponse'][0]['result'][0]['sessionId'][0]
       @server_url = response_parsed['Body'][0]['loginResponse'][0]['result'][0]['serverUrl'][0]
 
-      @@INSTANCE_HOST = instance_host()
+      @instance_host = instance_host()
     end
 
     def instance_host()
@@ -58,21 +62,21 @@ module SalesforceBulk
 
     def post_xml(host, path, xml, headers)
 
-      host = host || @@INSTANCE_HOST
+      host = host || @instance_host
 
-      if host != @@LOGIN_HOST # Not login, need to add session id to header
+      if host != @login_host # Not login, need to add session id to header
         headers['X-SFDC-Session'] = @session_id;
-        path = "#{@@PATH_PREFIX}#{path}"
+        path = "#{@path_prefix}#{path}"
       end
 
       https(host).post(path, xml, headers).body
     end
 
     def get_request(host, path, headers)
-      host = host || @@INSTANCE_HOST
-      path = "#{@@PATH_PREFIX}#{path}"
+      host = host || @instance_host
+      path = "#{@path_prefix}#{path}"
 
-      if host != @@LOGIN_HOST # Not login, need to add session id to header
+      if host != @login_host # Not login, need to add session id to header
         headers['X-SFDC-Session'] = @session_id;
       end
 
